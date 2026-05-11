@@ -19,6 +19,18 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = ['id']
 
 
+class UserProfileUpdateSerializer(serializers.ModelSerializer):
+    """Serializer para atualização de perfil — apenas first_name e last_name"""
+
+    class Meta:
+        model = User
+        fields = ['first_name', 'last_name']
+        extra_kwargs = {
+            'first_name': {'max_length': 150},
+            'last_name': {'max_length': 150},
+        }
+
+
 class UserRegistrationSerializer(serializers.ModelSerializer):
     """Serializer para registro de novos usuários"""
     

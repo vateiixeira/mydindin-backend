@@ -4,7 +4,9 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
-from finances.serializers import UserSerializer, UserRegistrationSerializer
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
+from finances.serializers import UserSerializer, UserRegistrationSerializer, UserProfileUpdateSerializer
 
 
 @api_view(['POST'])
@@ -71,14 +73,86 @@ def login(request):
     })
 
 
-@api_view(['GET'])
+@api_view(['GET', 'PATCH'])
 @permission_classes([IsAuthenticated])
 def profile(request):
     """
-    Endpoint para obter informações do usuário logado.
+    GET  — retorna informações do usuário logado.
+    PATCH — atualiza first_name e/ou last_name do usuário logado.
     """
-    serializer = UserSerializer(request.user)
-    return Response(serializer.data)
+    if request.method == 'GET':
+        serializer = UserSerializer(request.user)
+        return Response(serializer.data)
+
+    serializer = UserProfileUpdateSerializer(request.user, data=request.data, partial=True)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(UserSerializer(request.user).data)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def change_password(request):
+    """
+    Troca a senha do usuário autenticado.
+
+    Body: { current_password, new_password, new_password_confirm, refresh (opcional) }
+
+    Se `refresh` for fornecido, o token é invalidado via blacklist e um novo par de
+    tokens é retornado. Caso contrário, a senha é alterada mas tokens existentes
+    permanecem válidos até sua expiração natural.
+    """
+    current_password = request.data.get('current_password')
+    new_password = request.data.get('new_password')
+    new_password_confirm = request.data.get('new_password_confirm', '')
+    refresh_token_str = request.data.get('refresh')
+
+    errors = {}
+
+    if not current_password:
+        errors['current_password'] = 'Campo obrigatório.'
+    elif not request.user.check_password(current_password):
+        errors['current_password'] = 'Senha atual incorreta.'
+
+    if not new_password:
+        errors['new_password'] = 'Campo obrigatório.'
+    else:
+        if new_password != new_password_confirm:
+            errors['new_password_confirm'] = 'As senhas não coincidem.'
+        try:
+            validate_password(new_password, request.user)
+        except DjangoValidationError as exc:
+            errors['new_password'] = list(exc.messages)
+
+    if errors:
+        return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+
+    # Validar o refresh token ANTES de alterar a senha. Se o token for inválido,
+    # a senha não é modificada e o 400 é semanticamente correto.
+    if refresh_token_str:
+        try:
+            old_token = RefreshToken(refresh_token_str)
+            old_token.blacklist()
+        except Exception:
+            return Response(
+                {'refresh': 'Token inválido ou já invalidado.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    request.user.set_password(new_password)
+    request.user.save()
+
+    response_data = {'message': 'Senha alterada com sucesso.'}
+
+    if refresh_token_str:
+        new_refresh = RefreshToken.for_user(request.user)
+        response_data['tokens'] = {
+            'refresh': str(new_refresh),
+            'access': str(new_refresh.access_token),
+        }
+
+    return Response(response_data)
 
 
 @api_view(['POST'])
