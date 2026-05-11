@@ -340,28 +340,39 @@ class RecurringTemplateViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def generate_now(self, request, pk=None):
         """
-        Gera manualmente uma transação a partir do template.
+        Gera manualmente N meses de transações a partir do template.
         Uso: POST /api/recurring-templates/{id}/generate_now/
+        Body: { "months": 3 }  (default: 1)
         """
         template = self.get_object()
-        
-        # Importar aqui para evitar import circular
+
+        months = request.data.get('months', 1)
+        try:
+            months = int(months)
+            if months < 1 or months > 24:
+                raise ValueError
+        except (ValueError, TypeError):
+            return Response(
+                {'error': 'O campo "months" deve ser um número inteiro entre 1 e 24'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         from .services.recurring_service import RecurringService
-        
         service = RecurringService()
-        transaction = service.generate_transaction_from_template(template)
-        
-        if transaction:
+        transactions = service.generate_months(template, months)
+
+        if transactions:
+            template.refresh_from_db()
             return Response({
-                'message': 'Transação gerada com sucesso',
-                'transaction_id': transaction.id,
-                'transaction_description': transaction.description,
-                'amount': float(transaction.amount)
+                'generated': len(transactions),
+                'last_generated_date': template.last_generated_date.strftime('%m/%Y') if template.last_generated_date else None,
+                'transaction_ids': [t.id for t in transactions]
             }, status=status.HTTP_201_CREATED)
         else:
-            return Response({
-                'error': 'Não foi possível gerar a transação'
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {'error': 'Não foi possível gerar as transações'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
     
     @action(detail=False, methods=['get'])
     def active(self, request):
@@ -371,6 +382,21 @@ class RecurringTemplateViewSet(viewsets.ModelViewSet):
         """
         queryset = self.get_queryset().filter(is_active=True)
         serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'])
+    def transactions(self, request, pk=None):
+        """
+        Lista todas as transações geradas por este template.
+        Uso: GET /api/recurring-templates/{id}/transactions/
+        """
+        template = self.get_object()
+        transactions = Transaction.objects.filter(
+            user=request.user,
+            description=template.description,
+            notes__contains=f"template: {template.description}"
+        ).order_by('-transaction_date')
+        serializer = TransactionSerializer(transactions, many=True)
         return Response(serializer.data)
 
 
