@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
+from django.db import transaction
 from django.db.models import Q, Sum, Count
 from django.utils import timezone
 from datetime import datetime, date
@@ -310,8 +311,13 @@ class RecurringTemplateViewSet(viewsets.ModelViewSet):
         return RecurringTemplate.objects.filter(user=self.request.user).select_related('category', 'user')
     
     def perform_create(self, serializer):
-        """Associa o template ao usuário logado"""
-        serializer.save(user=self.request.user)
+        """Associa o template ao usuário logado e gera transações futuras se solicitado"""
+        generate_now = self.request.data.get('generate_now', False)
+        with transaction.atomic():
+            template = serializer.save(user=self.request.user)
+            if generate_now and template.end_date:
+                from .services.recurring_service import RecurringService
+                RecurringService().generate_all_from_start(template)
     
     @action(detail=True, methods=['post'])
     def pause(self, request, pk=None):
@@ -342,7 +348,8 @@ class RecurringTemplateViewSet(viewsets.ModelViewSet):
         """
         Gera manualmente N meses de transações a partir do template.
         Uso: POST /api/recurring-templates/{id}/generate_now/
-        Body: { "months": 3 }  (default: 1)
+        Body: { "months": 3, "force": false }  (defaults: months=1, force=false)
+        Quando force=True, ignora end_date do template.
         """
         template = self.get_object()
 
@@ -357,17 +364,26 @@ class RecurringTemplateViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        force = bool(request.data.get('force', False))
+
         from .services.recurring_service import RecurringService
         service = RecurringService()
-        transactions = service.generate_months(template, months)
+        transactions, truncated = service.generate_months(template, months, force=force)
 
         if transactions:
             template.refresh_from_db()
-            return Response({
+            response_data = {
                 'generated': len(transactions),
+                'truncated': truncated,
                 'last_generated_date': template.last_generated_date.strftime('%m/%Y') if template.last_generated_date else None,
                 'transaction_ids': [t.id for t in transactions]
-            }, status=status.HTTP_201_CREATED)
+            }
+            return Response(response_data, status=status.HTTP_201_CREATED)
+        elif truncated:
+            return Response(
+                {'generated': 0, 'truncated': True, 'error': 'Todas as datas solicitadas excedem o end_date do template'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         else:
             return Response(
                 {'error': 'Não foi possível gerar as transações'},
@@ -665,6 +681,21 @@ class CreditCardViewSet(viewsets.ModelViewSet):
         serializer = CreditCardInvoiceSerializer(invoices, many=True)
         return Response(serializer.data)
     
+    @action(detail=True, methods=['post'])
+    def generate_invoices(self, request, pk=None):
+        """
+        Gera faturas faltantes para o cartão desde o mês mais antigo relevante até o mês atual.
+        Uso: POST /api/credit-cards/{id}/generate_invoices/
+        """
+        card = self.get_object()
+
+        from django.db import transaction
+        from .services.invoice_service import InvoiceService
+        with transaction.atomic():
+            result = InvoiceService.generate_invoices_for_card(card)
+
+        return Response(result, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=['get'])
     def summary(self, request, pk=None):
         """
@@ -672,7 +703,7 @@ class CreditCardViewSet(viewsets.ModelViewSet):
         Uso: GET /api/credit-cards/{id}/summary/
         """
         card = self.get_object()
-        
+
         total_invoices = card.invoices.count()
         pending_invoices = card.invoices.filter(status='pending').count()
         paid_invoices = card.invoices.filter(status='paid').count()

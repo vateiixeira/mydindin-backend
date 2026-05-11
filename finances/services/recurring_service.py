@@ -29,7 +29,7 @@ class RecurringService:
             notes=f"Gerado automaticamente do template: {template.description}"
         )
 
-    def generate_months(self, template, months):
+    def generate_months(self, template, months, force=False):
         """
         Gera N transações mensais a partir do mês seguinte ao last_generated_date,
         ou do mês atual se nunca gerado.
@@ -37,9 +37,11 @@ class RecurringService:
         Args:
             template: Instância de RecurringTemplate
             months: Número de meses a gerar
+            force: Se True, ignora verificação de end_date
 
         Returns:
-            Lista de Transaction criadas
+            Tupla (lista de Transaction criadas, truncated) onde truncated indica
+            se a geração foi interrompida por end_date.
         """
         today = date.today()
 
@@ -51,6 +53,7 @@ class RecurringService:
             start = today.replace(day=1)
 
         transactions = []
+        truncated = False
         for i in range(months):
             target_month = start + relativedelta(months=i)
             # Respeita o limite de dias do mês (ex: dia 31 em fevereiro → dia 28/29)
@@ -58,8 +61,42 @@ class RecurringService:
             day = min(template.day_of_month, last_day)
             target_date = date(target_month.year, target_month.month, day)
 
+            if not force and template.end_date and target_date > template.end_date:
+                truncated = True
+                break
+
             transaction = self._create_transaction_for_date(template, target_date)
             transactions.append(transaction)
+
+        if transactions:
+            template.last_generated_date = transactions[-1].transaction_date
+            template.save()
+
+        return transactions, truncated
+
+    def generate_all_from_start(self, template):
+        """
+        Gera todas as transações desde start_date até end_date (inclusive).
+        Usado quando generate_now=True na criação do template.
+        Requer que end_date esteja definido.
+        """
+        if not template.end_date:
+            return []
+
+        transactions = []
+        current_month = template.start_date.replace(day=1)
+        end_month = template.end_date.replace(day=1)
+
+        while current_month <= end_month:
+            last_day = calendar.monthrange(current_month.year, current_month.month)[1]
+            day = min(template.day_of_month, last_day)
+            target_date = date(current_month.year, current_month.month, day)
+
+            if target_date >= template.start_date and target_date <= template.end_date:
+                transaction = self._create_transaction_for_date(template, target_date)
+                transactions.append(transaction)
+
+            current_month = current_month + relativedelta(months=1)
 
         if transactions:
             template.last_generated_date = transactions[-1].transaction_date
@@ -84,7 +121,7 @@ class RecurringService:
         if template.end_date and date.today() > template.end_date:
             return None
 
-        transactions = self.generate_months(template, 1)
+        transactions, _ = self.generate_months(template, 1)
         return transactions[0] if transactions else None
 
     def should_generate_today(self, template):

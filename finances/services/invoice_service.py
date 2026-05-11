@@ -2,10 +2,11 @@
 Serviço para gerenciamento automático de faturas de cartão de crédito.
 """
 
-from datetime import date
+from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
 from decimal import Decimal
 from django.db.models import Q
+from django.utils import timezone
 from ..models import CreditCard, CreditCardInvoice, Transaction, Installment
 
 
@@ -107,19 +108,115 @@ class InvoiceService:
         
         return invoice, True
     
+    # Lookback máximo para evitar loops longos em cartões sem histórico (3 anos)
+    MAX_LOOKBACK_MONTHS = 36
+
+    @staticmethod
+    def _get_card_start_month(card):
+        """
+        Determina o mês de início mais antigo relevante para o cartão:
+        mês da fatura mais antiga, da transação mais antiga vinculada, ou do created_at do cartão.
+        Limitado a MAX_LOOKBACK_MONTHS meses atrás para evitar iterações excessivas.
+        """
+        today = date.today()
+        floor_month = date(today.year, today.month, 1) - relativedelta(months=InvoiceService.MAX_LOOKBACK_MONTHS)
+
+        card_created_date = timezone.localtime(card.created_at).date()
+        candidates = [date(card_created_date.year, card_created_date.month, 1)]
+
+        oldest_invoice = CreditCardInvoice.objects.filter(
+            credit_card=card
+        ).order_by('reference_month').values_list('reference_month', flat=True).first()
+        if oldest_invoice:
+            candidates.append(date(oldest_invoice.year, oldest_invoice.month, 1))
+
+        oldest_txn_date = Transaction.objects.filter(
+            credit_card=card
+        ).order_by('transaction_date').values_list('transaction_date', flat=True).first()
+        if oldest_txn_date:
+            candidates.append(date(oldest_txn_date.year, oldest_txn_date.month, 1))
+
+        return max(min(candidates), floor_month)
+
+    @staticmethod
+    def _should_create_month_invoice(card, reference_month, today=None):
+        """
+        Retorna True se a fatura do mês deve ser criada:
+        - closing_date já passou, OU
+        - hoje está a ≤ 10 dias do due_date
+        """
+        if today is None:
+            today = date.today()
+
+        closing_date, due_date = InvoiceService.calculate_invoice_dates(card, reference_month)
+
+        if today >= closing_date:
+            return True
+
+        # Se closing_date ainda não passou, verifica proximidade do due_date.
+        # Para due_date no passado timedelta.days seria negativo (≤ 10), mas closing_date < due_date
+        # e today >= closing_date já teria retornado True — esta condição cobre apenas datas futuras.
+        if (due_date - today).days <= 10:
+            return True
+
+        return False
+
+    @staticmethod
+    def generate_invoices_for_card(card, up_to_month=None):
+        """
+        Gera todas as faturas faltantes para o cartão desde o mês mais antigo relevante
+        até up_to_month (padrão: mês atual).
+
+        Só cria fatura do mês atual se closing_date já passou ou hoje está a ≤ 10 dias do due_date.
+
+        Returns:
+            dict: { 'created': int, 'skipped': int, 'months': list[str] }
+        """
+        today = date.today()
+        current_month = date(today.year, today.month, 1)
+
+        if up_to_month is None:
+            up_to_month = current_month
+
+        # Nunca gerar faturas de meses futuros
+        up_to_month = min(up_to_month, current_month)
+
+        start_month = InvoiceService._get_card_start_month(card)
+
+        created = 0
+        skipped = 0
+        months = []
+
+        month = start_month
+        while month <= up_to_month:
+            if month == current_month:
+                if not InvoiceService._should_create_month_invoice(card, month, today):
+                    break
+
+            invoice, was_created = InvoiceService.get_or_create_invoice(card, month)
+            months.append(month.strftime('%m/%Y'))
+
+            if was_created:
+                created += 1
+            else:
+                skipped += 1
+
+            month = month + relativedelta(months=1)
+
+        return {'created': created, 'skipped': skipped, 'months': months}
+
     @staticmethod
     def create_pending_invoices():
         """
         Cria faturas pendentes para todos os cartões ativos.
-        Cria faturas quando a data de fechamento já passou.
+        Itera desde o mês mais antigo relevante até o mês atual, criando faturas faltantes.
         Também vincula parcelas (installments) pendentes que ainda não têm fatura.
-        
+
         Returns:
             dict: Estatísticas de processamento
         """
         from ..models import Installment
-        
-        today = date.today()
+
         stats = {
             'processed': 0,
             'created': 0,
@@ -127,42 +224,20 @@ class InvoiceService:
             'linked_installments': 0,
             'errors': []
         }
-        
-        # Buscar todos os cartões ativos
+
         active_cards = CreditCard.objects.filter(is_active=True)
-        
+
         for card in active_cards:
             stats['processed'] += 1
-            
+
             try:
-                # Verificar se precisa criar fatura para o mês atual
-                current_month = date(today.year, today.month, 1)
-                
-                # Calcular data de fechamento do mês atual
-                closing_date, _ = InvoiceService.calculate_invoice_dates(card, current_month)
-                
-                # Se a data de fechamento já passou, criar fatura se não existir
-                if today >= closing_date:
-                    invoice, created = InvoiceService.get_or_create_invoice(card, current_month)
-                    
-                    if created:
-                        stats['created'] += 1
-                        print(f"  ✓ Fatura criada: {card.name} - {current_month.strftime('%m/%Y')}")
-                    else:
-                        stats['skipped'] += 1
-                
-                # Também verificar o mês seguinte (para criar com antecedência se desejado)
-                # Descomentado: Criar fatura do próximo mês assim que o mês atual fechar
-                next_month = current_month + relativedelta(months=1)
-                next_closing_date, _ = InvoiceService.calculate_invoice_dates(card, next_month)
-                
-                # Se já passamos do fechamento do mês atual, podemos criar a do próximo
-                if today >= closing_date:
-                    invoice, created = InvoiceService.get_or_create_invoice(card, next_month)
-                    if created:
-                        stats['created'] += 1
-                        print(f"  ✓ Fatura criada (próximo mês): {card.name} - {next_month.strftime('%m/%Y')}")
-                
+                result = InvoiceService.generate_invoices_for_card(card)
+                stats['created'] += result['created']
+                stats['skipped'] += result['skipped']
+
+                for month_str in result['months']:
+                    print(f"  ✓ Fatura processada: {card.name} - {month_str}")
+
             except Exception as e:
                 error_msg = f"Erro ao processar cartão {card.name}: {str(e)}"
                 stats['errors'].append(error_msg)
