@@ -1,0 +1,172 @@
+[
+  {
+    "model": "finances.category",
+    "pk": 1,
+    "fields": {
+      "name": "Salário",
+      "type": "income",
+      "description": "Salário mensal",
+      "is_default": true,
+      "user": null,
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "finances.category",
+    "pk": 2,
+    "fields": {
+      "name": "Freelance",
+      "type": "income",
+      "description": "Trabalhos freelance",
+      "is_default": true,
+      "user": null,
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "finances.category",
+    "pk": 3,
+    "fields": {
+      "name": "Investimentos",
+      "type": "income",
+      "description": "Rendimentos de investimentos",
+      "is_default": true,
+      "user": null,
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "finances.category",
+    "pk": 4,
+    "fields": {
+      "name": "Outras Receitas",
+      "type": "income",
+      "description": "Outras fontes de receita",
+      "is_default": true,
+      "user": null,
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "finances.category",
+    "pk": 5,
+    "fields": {
+      "name": "Moradia",
+      "type": "expense",
+      "description": "Aluguel, condomínio, IPTU",
+      "is_default": true,
+      "user": null,
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "finances.category",
+    "pk": 6,
+    "fields": {
+      "name": "Alimentação",
+      "type": "expense",
+      "description": "Supermercado, restaurantes",
+      "is_default": true,
+      "user": null,
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "finances.category",
+    "pk": 7,
+    "fields": {
+      "name": "Transporte",
+      "type": "expense",
+      "description": "Combustível, transporte público, Uber",
+      "is_default": true,
+      "user": null,
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "finances.category",
+    "pk": 8,
+    "fields": {
+      "name": "Saúde",
+      "type": "expense",
+      "description": "Plano de saúde, medicamentos, consultas",
+      "is_default": true,
+      "user": null,
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "finances.category",
+    "pk": 9,
+    "fields": {
+      "name": "Educação",
+      "type": "expense",
+      "description": "Cursos, livros, mensalidade escolar",
+      "is_default": true,
+      "user": null,
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "finances.category",
+    "pk": 10,
+    "fields": {
+      "name": "Lazer",
+      "type": "expense",
+      "description": "Entretenimento, viagens, hobbies",
+      "is_default": true,
+      "user": null,
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "finances.category",
+    "pk": 11,
+    "fields": {
+      "name": "Contas e Serviços",
+      "type": "expense",
+      "description": "Água, luz, internet, telefone",
+      "is_default": true,
+      "user": null,
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "finances.category",
+    "pk": 12,
+    "fields": {
+      "name": "Vestuário",
+      "type": "expense",
+      "description": "Roupas, calçados, acessórios",
+      "is_default": true,
+      "user": null,
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "finances.category",
+    "pk": 13,
+    "fields": {
+      "name": "Outras Despesas",
+      "type": "expense",
+      "description": "Despesas diversas",
+      "is_default": true,
+      "user": null,
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  }
+]
+
