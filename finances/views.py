@@ -881,30 +881,93 @@ class CreditCardInvoiceViewSet(viewsets.ModelViewSet):
         """
         invoice = self.get_object()
         installment_id = request.data.get('installment_id')
-        
+
         if not installment_id:
             return Response(
                 {'error': 'O campo installment_id é obrigatório'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         try:
             installment = Installment.objects.get(
                 id=installment_id,
                 plan__user=request.user
             )
-            
+
             # Vincular à fatura
             installment.invoice = invoice
             installment.save()
-            
+
             return Response({
                 'message': 'Parcela vinculada à fatura com sucesso',
                 'installment': InstallmentSerializer(installment).data
             })
-        
+
         except Installment.DoesNotExist:
             return Response(
                 {'error': 'Parcela não encontrada'},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+    @action(detail=True, methods=['post'])
+    def create_payment_transaction(self, request, pk=None):
+        """
+        Cria ou atualiza a transação de pagamento da fatura.
+        Uso: POST /api/invoices/{id}/create_payment_transaction/
+        Payload opcional: {"payment_date": "2026-05-10", "amount": "1234.56"}
+        """
+        from .services.invoice_service import InvoiceService
+        from datetime import datetime
+        from decimal import Decimal, InvalidOperation
+
+        invoice = self.get_object()
+
+        payment_date = None
+        raw_date = request.data.get('payment_date')
+        if raw_date:
+            try:
+                payment_date = datetime.strptime(raw_date, '%Y-%m-%d').date()
+            except ValueError:
+                return Response(
+                    {'error': 'Formato de data inválido. Use YYYY-MM-DD.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        amount = None
+        raw_amount = request.data.get('amount')
+        if raw_amount is not None:
+            try:
+                amount = Decimal(str(raw_amount))
+                if amount <= 0:
+                    raise ValueError
+            except (ValueError, InvalidOperation):
+                return Response(
+                    {'error': 'Valor inválido. Informe um número positivo.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        txn = InvoiceService.create_payment_transaction(invoice, payment_date=payment_date, amount=amount)
+        invoice.refresh_from_db()
+        serializer = self.get_serializer(invoice)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post', 'delete'])
+    def remove_payment_transaction(self, request, pk=None):
+        """
+        Remove a transação de pagamento da fatura.
+        Uso: DELETE /api/invoices/{id}/remove_payment_transaction/
+        """
+        from .services.invoice_service import InvoiceService
+
+        invoice = self.get_object()
+
+        if not invoice.payment_transaction_id:
+            return Response(
+                {'error': 'Esta fatura não possui transação de pagamento.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        InvoiceService.remove_payment_transaction(invoice)
+        invoice.refresh_from_db()
+        serializer = self.get_serializer(invoice)
+        return Response(serializer.data)

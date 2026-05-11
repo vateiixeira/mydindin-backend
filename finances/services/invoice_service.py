@@ -382,6 +382,89 @@ class InvoiceService:
             invoice.save(update_fields=['total_amount'])
     
     @staticmethod
+    def create_payment_transaction(invoice, payment_date=None, category=None, amount=None):
+        """
+        Cria (ou atualiza) a transação de pagamento da fatura.
+        A transação representa o débito bancário do pagamento — NÃO tem credit_card
+        para evitar loop nos signals de auto-link.
+
+        Args:
+            invoice: Objeto CreditCardInvoice
+            payment_date: Data do pagamento (date). Se None, usa invoice.due_date
+            category: Objeto Category (expense). Se None, usa/cria "Cartão de Crédito" padrão.
+            amount: Valor do pagamento (Decimal). Se None, usa invoice.total_amount
+
+        Returns:
+            Transaction: transação de pagamento criada/atualizada
+        """
+        from ..models import Category, Transaction
+        from django.db import transaction as db_transaction
+
+        if payment_date is None:
+            payment_date = invoice.due_date
+
+        effective_amount = Decimal(str(amount)) if amount is not None else invoice.total_amount
+
+        if category is None:
+            # get_or_create evita race condition se duas requisições chegarem simultaneamente
+            category, _ = Category.objects.get_or_create(
+                name='Cartão de Crédito',
+                type='expense',
+                is_default=True,
+                user=None,
+            )
+
+        description = (
+            f"Fatura {invoice.credit_card.name} "
+            f"{invoice.reference_month.strftime('%m/%Y')}"
+        )
+
+        if invoice.payment_transaction_id:
+            # Idempotente: atualiza a transação existente em vez de criar outra
+            txn = invoice.payment_transaction
+            txn.amount = effective_amount
+            txn.transaction_date = payment_date
+            txn.payment_date = payment_date
+            txn.description = description
+            txn.save(update_fields=['amount', 'transaction_date', 'payment_date', 'description'])
+        else:
+            # Atômico: se invoice.save() falhar, a Transaction criada é revertida junto
+            with db_transaction.atomic():
+                txn = Transaction.objects.create(
+                    user=invoice.credit_card.user,
+                    category=category,
+                    type='expense',
+                    description=description,
+                    amount=effective_amount,
+                    transaction_date=payment_date,
+                    payment_date=payment_date,
+                    status='paid',
+                    # credit_card intencionalmente ausente — evita loop de signals
+                )
+                invoice.payment_transaction = txn
+                invoice.save(update_fields=['payment_transaction'])
+
+        return txn
+
+    @staticmethod
+    def remove_payment_transaction(invoice):
+        """
+        Remove e deleta a transação de pagamento da fatura, se existir.
+        O on_delete=SET_NULL no FK garante que invoice.payment_transaction
+        é zerado automaticamente no DB ao deletar a Transaction.
+
+        Args:
+            invoice: Objeto CreditCardInvoice
+        """
+        txn = invoice.payment_transaction
+        if txn is None:
+            return
+
+        # Deleta a Transaction; o on_delete=SET_NULL cuida do NULL no FK
+        # de forma atômica — sem necessidade de dois saves separados.
+        txn.delete()
+
+    @staticmethod
     def update_overdue_invoices():
         """
         Atualiza o status de faturas atrasadas.

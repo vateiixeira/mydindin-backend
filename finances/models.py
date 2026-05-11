@@ -677,11 +677,20 @@ class CreditCardInvoice(models.Model):
         help_text='Valor já pago desta fatura'
     )
     notes = models.TextField('Observações', blank=True, null=True)
-    
+    payment_transaction = models.OneToOneField(
+        'Transaction',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='invoice_payment',
+        verbose_name='Transação de Pagamento',
+        help_text='Transação bancária que representa o pagamento desta fatura'
+    )
+
     # Metadados
     created_at = models.DateTimeField('Criado em', auto_now_add=True)
     updated_at = models.DateTimeField('Atualizado em', auto_now=True)
-    
+
     class Meta:
         verbose_name = 'Fatura de Cartão'
         verbose_name_plural = 'Faturas de Cartão'

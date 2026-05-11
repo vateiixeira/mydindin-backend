@@ -10,9 +10,9 @@ User = get_user_model()
 
 class UserSerializer(serializers.ModelSerializer):
     """Serializer para o modelo User"""
-    
+
     full_name = serializers.CharField(source='get_full_name', read_only=True)
-    
+
     class Meta:
         model = User
         fields = ['id', 'email', 'first_name', 'last_name', 'full_name']
@@ -110,6 +110,10 @@ class TransactionSerializer(serializers.ModelSerializer):
     credit_card_name = serializers.CharField(source='credit_card.name', read_only=True, allow_null=True)
     invoice_reference = serializers.CharField(source='invoice.reference_month', read_only=True, allow_null=True)
     payment_method_display = serializers.CharField(source='get_payment_method_display', read_only=True, allow_null=True)
+    is_invoice_payment = serializers.SerializerMethodField()
+
+    def get_is_invoice_payment(self, obj):
+        return hasattr(obj, 'invoice_payment') and obj.invoice_payment is not None
 
     class Meta:
         model = Transaction
@@ -121,6 +125,7 @@ class TransactionSerializer(serializers.ModelSerializer):
             'status', 'status_display', 'notes',
             'payment_method', 'payment_method_display',
             'credit_card', 'credit_card_name', 'invoice', 'invoice_reference',
+            'is_invoice_payment',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'user']
@@ -365,14 +370,27 @@ class CreditCardSerializer(serializers.ModelSerializer):
 
 class CreditCardInvoiceSerializer(serializers.ModelSerializer):
     """Serializer para faturas de cartão"""
-    
+
     credit_card_name = serializers.CharField(source='credit_card.name', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     reference_month_display = serializers.SerializerMethodField()
     declared_expenses = serializers.SerializerMethodField()
     unrelated_expenses = serializers.SerializerMethodField()
     remaining_balance = serializers.SerializerMethodField()
-    
+    payment_transaction_id = serializers.PrimaryKeyRelatedField(
+        source='payment_transaction', read_only=True
+    )
+    payment_transaction_description = serializers.CharField(
+        source='payment_transaction.description', read_only=True, allow_null=True
+    )
+    payment_transaction_amount = serializers.DecimalField(
+        source='payment_transaction.amount', max_digits=12, decimal_places=2,
+        read_only=True, allow_null=True
+    )
+    payment_transaction_status = serializers.CharField(
+        source='payment_transaction.status', read_only=True, allow_null=True
+    )
+
     class Meta:
         model = CreditCardInvoice
         fields = [
@@ -380,6 +398,8 @@ class CreditCardInvoiceSerializer(serializers.ModelSerializer):
             'reference_month_display', 'total_amount', 'closing_date', 'due_date',
             'status', 'status_display', 'payment_date', 'paid_amount',
             'declared_expenses', 'unrelated_expenses', 'remaining_balance',
+            'payment_transaction_id', 'payment_transaction_description',
+            'payment_transaction_amount', 'payment_transaction_status',
             'notes', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
