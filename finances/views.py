@@ -313,11 +313,16 @@ class RecurringTemplateViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """Associa o template ao usuário logado e gera transações futuras se solicitado"""
         generate_now = self.request.data.get('generate_now', False)
+        generate_months_count = int(self.request.data.get('generate_months', 3))
         with transaction.atomic():
             template = serializer.save(user=self.request.user)
-            if generate_now and template.end_date:
+            if generate_now:
                 from .services.recurring_service import RecurringService
-                RecurringService().generate_all_from_start(template)
+                service = RecurringService()
+                if template.end_date:
+                    service.generate_all_from_start(template)
+                else:
+                    service.generate_months(template, generate_months_count)
     
     @action(detail=True, methods=['post'])
     def pause(self, request, pk=None):
